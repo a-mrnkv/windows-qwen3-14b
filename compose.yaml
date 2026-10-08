@@ -1,0 +1,135 @@
+name: qwen-local
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    pull_policy: never
+    container_name: qwen-local
+    mem_limit: 16g
+    memswap_limit: 16g
+    cpus: "4.0"
+    restart: unless-stopped
+    networks:
+      - local
+    ports:
+      - "127.0.0.1:11434:11434"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    gpus: all
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_NO_CLOUD: "1"
+      OLLAMA_CONTEXT_LENGTH: "16384"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes:
+      - qwen-local-data:/root/.ollama
+
+  dozzle:
+    image: amir20/dozzle:v11.3.0
+    pull_policy: never
+    container_name: qwen-monitor
+    mem_limit: 384m
+    memswap_limit: 384m
+    cpus: "0.5"
+    restart: unless-stopped
+    depends_on:
+      - docker-proxy
+    networks:
+      - monitoring
+      - monitor-ui
+    ports:
+      - "127.0.0.1:8080:8080"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DOZZLE_REMOTE_HOST: "tcp://docker-proxy:2375"
+      DOZZLE_NO_ANALYTICS: "true"
+      DOZZLE_ENABLE_ACTIONS: "false"
+      DOZZLE_ENABLE_SHELL: "false"
+      DOZZLE_FILTER: "label=com.docker.compose.project=qwen-local"
+    volumes:
+      - dozzle-data:/data
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:slim
+    pull_policy: never
+    container_name: qwen-webui
+    restart: unless-stopped
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: "1.0"
+    depends_on:
+      - ollama
+    networks:
+      - local
+    ports:
+      - "127.0.0.1:3000:8080"
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      DEFAULT_MODELS: "qwen3-local"
+      ENABLE_OPENAI_API: "false"
+      OFFLINE_MODE: "true"
+      HF_HUB_OFFLINE: "1"
+      DO_NOT_TRACK: "true"
+      SCARF_NO_ANALYTICS: "true"
+      ANONYMIZED_TELEMETRY: "false"
+    volumes:
+      - open-webui-data:/app/backend/data
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    pull_policy: never
+    container_name: qwen-monitor-proxy
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: "0.5"
+    restart: unless-stopped
+    networks:
+      - monitoring
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      CONTAINERS: "1"
+      INFO: "1"
+      EVENTS: "1"
+      PING: "1"
+      VERSION: "1"
+      POST: "0"
+      EXEC: "0"
+      ALLOW_START: "0"
+      ALLOW_STOP: "0"
+      ALLOW_RESTARTS: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  open-webui-data:
+  dozzle-data:
+  qwen-local-data:
+    external: true
+
+networks:
+  local:
+    name: qwen-local-network
+    driver: bridge
+    internal: false
+  monitoring:
+    name: qwen-monitor-network
+    driver: bridge
+    internal: true
+  monitor-ui:
+    name: qwen-monitor-ui-network
+    driver: bridge
